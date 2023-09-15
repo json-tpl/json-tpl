@@ -1,0 +1,27 @@
+{
+  "plugins": ["import"],
+  "rules": {
+    "import/default": "error",
+    "import/export": "error",
+    "import/first": "error",
+    "import/named": "error",
+    "import/namespace": "error",
+    "import/no-mutable-exports": "error",
+    "import/order": "error",
+    "import/no-duplicates": "warn",
+    "import/no-named-as-default": "warn",
+    "import/no-anonymous-default-export": [
+      "warn",
+      {
+        "allowArray": true,
+        "allowArrowFunction": true,
+        "allowAnonymousClass": false,
+        "allowAnonymousFunction": false,
+        "allowCallExpression": true,
+        "allowNew": true,
+        "allowLiteral": true,
+        "allowObject": true
+      }
+    ]
+  }
+}
