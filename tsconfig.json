@@ -41,6 +41,6 @@
     "listFiles": false,
     "pretty": true
   },
-  "include": ["./**/.*.js", "./**/*.js", "./**/*.ts"],
+  "include": ["./**/.*.js", "./**/*.js", "./**/*.cjs", "./**/*.mjs", "./**/*.ts"],
   "exclude": ["node_modules/*", "./**/dist/*"]
 }

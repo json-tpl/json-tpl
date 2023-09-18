@@ -1,0 +1,23 @@
+- $if: ${ foo }
+  ?then: yeeess
+  ?else: qsd
+
+- $call: if
+  ?argv:
+    $call: var
+    $argv: foo
+  ?args:
+    ?then: yeeeees
+    ?else: noooooo
+
+- $define:
+    - prefixValidator: { $fn: "${ { $typeof: $argv } == 'string' && $argv.length > 0 }" }
+    - sayHello:
+        $fn: { $args.wrapper: '${ $args.prefix }, ${ $argv }!' }
+        ?argv:
+          validator: { $fn: '${ $argv.length > 0}' }
+        ?args:
+          prefix: { required: true, default: Hello, validator: '${ prefixValidator }' }
+          wrapper: { required: false, default: { $fn: "The program says: '' ${ $argv } ''" } }
+  ?in:
+    helloWorld: { $sayHello: 'World', ?prefix: 'Hi' }

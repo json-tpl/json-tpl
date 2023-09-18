@@ -1,12 +1,9 @@
-import type { MethodImplementation } from '../definitions'
+import { isString } from '../../util/string.js'
+import type { MethodImplementation } from '../definitions.js'
 
-export const implementation: MethodImplementation = function (methodCall, scope) {
-  const name = this.evaluateKey(methodCall, '$var', scope)
-
-  if (typeof name !== 'string') {
-    this.emitError?.(`Variable name must be a string (got: ${String(name)})`, ['$var'])
-    return undefined
-  }
+export const implementation: MethodImplementation = function () {
+  const name = this.evaluate(isString)
+  if (name === undefined) return undefined
 
   // "reserved" variables
   switch (name) {
@@ -20,5 +17,5 @@ export const implementation: MethodImplementation = function (methodCall, scope)
       return false
   }
 
-  return scope(name)
+  return this.getVariable(name)
 }

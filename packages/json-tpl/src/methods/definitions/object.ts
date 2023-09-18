@@ -1,38 +1,25 @@
-import type { Json, JsonObject } from '../../util/json'
-import type { MethodImplementation } from '../definitions'
+import type { Json, JsonObject } from '../../util/json.js'
+import type { MethodImplementation } from '../definitions.js'
 
-export const implementation: MethodImplementation = function (
-  methodCall,
-  scope
-): undefined | JsonObject {
-  const it = this.iterateKey(methodCall, '$object', scope)
-
+export const implementation: MethodImplementation = function (): undefined | JsonObject {
   const output: JsonObject = {}
 
-  let index = -1
-  let item: Json
+  const it = this.iterator(isTuple)
   for (let result = it.next(); !result.done; result = it.next()) {
-    item = result.value
-    index++
-
-    if (!isTuple(item)) {
-      this.emitError?.(`$object entries must be [key, value] tupples.`, ['$object', index])
-      continue
-    }
+    const item = result.value
+    if (item === undefined) continue
 
     const key = item[0]
-
-    if (typeof key !== 'string' && typeof key !== 'number') {
-      this.emitError?.(`$object entry key must be of type string or number`, ['$object', index, 0])
-      continue
+    if (typeof key === 'string' || typeof key === 'number') {
+      output[key] = item[1]
+    } else {
+      this.emitError?.(`$object entry key must be of type string or number`, key)
     }
-
-    output[key] = item[1]
   }
 
   return output
 }
 
-function isTuple(v: Json): v is [Json, Json] {
+function isTuple(v: Json | undefined): v is [Json, Json] {
   return Array.isArray(v) && v.length === 2
 }

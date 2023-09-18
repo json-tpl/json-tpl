@@ -1,6 +1,6 @@
-import type { MethodImplementation } from '../definitions'
+import type { MethodImplementation } from '../definitions.js'
 
-export const implementation: MethodImplementation = function (methodCall, scope): boolean {
-  const value = this.evaluateKey(methodCall, '$not', scope)
+export const implementation: MethodImplementation = function (): boolean {
+  const value = this.evaluate()
   return !value
 }

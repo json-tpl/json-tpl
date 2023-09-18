@@ -1,5 +1,5 @@
-import { toJson, type Json } from './json'
-import type { PlainObject } from './object'
+import { toJson, type Json } from './json.js'
+import type { PlainObject } from './object.js'
 
 export type Scope = (name: string) => undefined | Json
 
