@@ -1,49 +1,36 @@
-import type { Scope } from '../../util/scope'
-import type { Json } from '../../util/json'
-import type { PlainObject } from '../../util/object'
+import type { Json } from '../../util/json.js'
+import type { PlainObject } from '../../util/object.js'
 
-import type { MethodCall, MethodContext, MethodImplementation } from '../definitions'
+import type { MethodContext, MethodImplementation } from '../definitions.js'
 
-export const implementation: MethodImplementation = function (
-  methodCall,
-  scope
-): undefined | Json[] {
-  const as = this.evaluateKey(methodCall, '$as', scope)
-  const alias = typeof as === 'string' && as ? as : undefined
-  if (as !== undefined && alias === undefined) {
-    this.emitError?.(`$as must be a non-empty string`, ['$as'])
-    return undefined
-  }
+function isValidAlias(name: unknown): name is string | undefined {
+  if (name === undefined) return true
+  return typeof name === 'string' && name !== ''
+}
 
-  const input = this.evaluateKey(methodCall, '$for', scope)
+export const implementation: MethodImplementation = function (): undefined | Json[] {
+  const alias = this.arg('as')?.evaluate(isValidAlias)
+
+  const input = this.evaluate()
   switch (typeof input) {
-    case 'number':
-      return buildArray.call(this, methodCall, scope, input, alias, (index) => index + 1)
+    case 'number': {
+      const getValue = (index: number): Json => index + 1
+      return buildArray.call(this, input, alias, getValue)
+    }
     case 'object':
       if (Array.isArray(input)) {
-        return buildArray.call(
-          this,
-          methodCall,
-          scope,
-          input.length,
-          alias,
-          (index) => input[index]
-        )
+        const getValue = (index: number): Json => input[index] ?? null
+        return buildArray.call(this, input.length, alias, getValue)
       } else if (input !== null) {
         const keys = Object.keys(input).filter(isJsonKey, input)
-        return buildArray.call(
-          this,
-          methodCall,
-          scope,
-          keys.length,
-          alias,
-          (index) => input[keys[index]] as Json,
-          (index) => keys[index]
-        )
+        const getValue = (index: number): Json => input[keys[index]] as Json
+        const getKey = (index: number): string => keys[index]
+
+        return buildArray.call(this, keys.length, alias, getValue, getKey)
       }
     // falls through
     default:
-      this.emitError?.(`$for input must be an array, object or number`, ['$for'])
+      this.emitError?.(`$for input must be an array, object or number`, input)
       return undefined
   }
 }
@@ -65,8 +52,6 @@ const prefixed = (name: string, prefix?: string) => (prefix ? prefix + name : na
 
 function buildArray(
   this: MethodContext,
-  methodCall: MethodCall,
-  scope: Scope,
   length: number,
   alias: undefined | string,
   getValue: (index: number) => Json,
@@ -74,20 +59,28 @@ function buildArray(
 ): Json[] {
   let index = 0
 
-  const childScope: Scope = (name) => {
-    if (name === prefixed(`$value`, alias)) return getValue(index)
-    if (name === prefixed(`$index`, alias)) return index
-    if (name === prefixed(`$position`, alias)) return index + 1
-    if (name === prefixed(`$key`, alias)) return getKey?.(index)
-    if (name === prefixed(`$first`, alias)) return index === 0
-    if (name === prefixed(`$last`, alias)) return index === length - 1
-    return scope(name)
-  }
+  const loopBody = this.arg('do', (varName) => {
+    if (varName === prefixed(`$value`, alias)) return getValue(index)
+    if (varName === prefixed(`$index`, alias)) return index
+    if (varName === prefixed(`$position`, alias)) return index + 1
+    if (varName === prefixed(`$key`, alias)) return getKey?.(index)
+    if (varName === prefixed(`$first`, alias)) return index === 0
+    if (varName === prefixed(`$last`, alias)) return index === length - 1
+
+    return this.getVariable(varName)
+  })
 
   const result = Array(length) as Json[]
-  for (index = 0; index < length; index++) {
-    const resultItem = this.evaluateKey(methodCall, '$do', childScope)
-    result[index] = resultItem === undefined ? null : resultItem
+  if (loopBody) {
+    for (index = 0; index < length; index++) {
+      const resultItem = loopBody.evaluate()
+      result[index] = resultItem === undefined ? null : resultItem
+    }
+  } else {
+    for (index = 0; index < length; index++) {
+      this.evaluator.increaseCount()
+      result[index] = getValue(index)
+    }
   }
   return result
 }

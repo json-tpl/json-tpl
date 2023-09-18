@@ -1,8 +1,24 @@
-import { isPlainObject } from './object'
+import { isPlainObject } from './object.js'
 
 export type JsonScalar = string | number | boolean | null
 export type JsonObject = { [_ in string]?: Json }
 export type Json = JsonScalar | Json[] | { [_ in string]?: Json }
+
+export function isJson(input: unknown): input is Json {
+  switch (typeof input) {
+    case 'string':
+    case 'boolean':
+    case 'number':
+      return true
+    case 'object':
+      if (input === null) return true
+      if (Array.isArray(input)) return input.every(isJson)
+      if (isPlainObject(input)) return Object.values(input).every(isJson)
+      return false
+    default:
+      return false
+  }
+}
 
 export function toJson(input: unknown): Json | undefined {
   switch (typeof input) {

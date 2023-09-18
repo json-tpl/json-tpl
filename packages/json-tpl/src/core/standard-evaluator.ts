@@ -1,221 +1,233 @@
-import type { Scope } from '../util/scope'
-import type { ErrorHandler } from '../util/function'
-import type { Json, JsonObject } from '../util/json'
-import type { Path } from '../util/path'
+import type { Json, JsonObject } from '../util/json.js'
 
-import {
-  ErrorEmitter,
-  MethodCall,
-  MethodContext,
-  MethodDefinition,
-  MethodName,
-  isMethodCall,
-} from '../methods/definitions'
-import internalMethods from '../methods/index'
-import { EvaluationError, EvaluationLimitError } from '../util/error'
-import { combinePaths } from '../util/path'
+import { MethodContext, MethodEvaluator, MethodImplementation } from '../methods/definitions.js'
+import internalMethods from '../methods/index.js'
+import { EvaluationError, EvaluationLimitError } from '../util/error.js'
+import { EvaluationContext, ResultValidator } from '../util/context.js'
+import { ErrorHandler } from '../util/function.js'
 
 export type EvaluatorOptions = {
   limit?: number
-  path?: Readonly<Path>
-  onError?: false | ErrorHandler<EvaluationError>
-  methods?: Iterable<[MethodName, MethodDefinition]>
+  callPrefix?: string
+  onError?: false | ErrorHandler
 }
 
-export class StandardEvaluator implements MethodContext {
-  protected readonly customMethods?: Map<MethodName, MethodDefinition>
-  public readonly currentPath: Path
+export class StandardEvaluator {
   public executionCount: number
   public readonly executionLimit: number
-  public readonly emitError?: ErrorEmitter
+  public readonly callPrefix: string
+  protected readonly callKey: string // cached
+  public readonly onError?: ErrorHandler
 
   constructor(options?: EvaluatorOptions) {
-    this.currentPath = options?.path?.length ? [...options.path] : []
     this.executionCount = 0
-    this.executionLimit = options?.limit || Number.MAX_SAFE_INTEGER
-
-    const onError = options?.onError
-    this.emitError = onError
-      ? (message, path): never | undefined => {
-          const fullPath = combinePaths(this.currentPath, path)
-          onError(new EvaluationError(message, fullPath))
-          return undefined
-        }
-      : undefined
+    this.executionLimit = options?.limit || 1e9 // TODO: check what makes sence here
+    this.callPrefix = options?.callPrefix || '@'
+    this.callKey = `${this.callPrefix}call`
+    this.onError = options?.onError || undefined
   }
 
-  public reset() {
+  public resetCount() {
     this.executionCount = 0
   }
 
-  public evaluate(template: undefined | Json, scope: Scope): Json | undefined {
-    if (++this.executionCount > this.executionLimit) {
+  public increaseCount() {
+    if (this.executionCount >= this.executionLimit) {
       // Because we could be generating a (very) large array, we need a hard
       // throw here. Otherwise, the executionLimit would be useless.
       throw new EvaluationLimitError(this.executionCount)
     }
-
-    // We allow evaluation "undefined" templates so that those are take into
-    // account in the execution count.
-    if (template === undefined) {
-      return undefined
-    }
-
-    const result = this.evaluateJson(template, scope)
-    if (result === undefined) {
-      this.emitError?.('Invalid template')
-    }
-
-    return result
+    this.executionCount += 1
   }
 
-  protected evaluateJson(template: Json, scope: Scope): Json | undefined {
-    switch (typeof template) {
+  public evaluate<T extends undefined | Json = undefined | Json>(
+    context: EvaluationContext,
+    validator?: ResultValidator<T>
+  ): T | undefined {
+    this.increaseCount()
+
+    const result = this.evaluateJson(context)
+
+    if (validator) {
+      if (validator(result)) {
+        return result
+      } else {
+        this.onError?.(new EvaluationError('Invalid result', context))
+        return undefined
+      }
+    } else if (result === undefined) {
+      this.onError?.(new EvaluationError('Invalid template', context))
+      return undefined
+    } else {
+      return result as T | undefined
+    }
+  }
+
+  protected evaluateJson(context: EvaluationContext): Json | undefined {
+    switch (typeof context.template) {
       case 'boolean':
-        return template
+        return context.template
       case 'number':
-        return this.evaluateNumber(template, scope)
+        return this.evaluateNumber(context as EvaluationContext<number>)
       case 'string':
-        return this.evaluateString(template, scope)
+        return this.evaluateString(context as EvaluationContext<string>)
       case 'object':
-        if (template === null) {
-          return template
+        if (context.template === null) {
+          return this.evaluateNull(context as EvaluationContext<null>)
+        } else if (Array.isArray(context.template)) {
+          return this.evaluateArray(context as EvaluationContext<Json[]>)
+        } else {
+          return this.evaluateObject(context as EvaluationContext<JsonObject>)
         }
-        if (Array.isArray(template)) {
-          return this.evaluateArray(template, scope)
-        }
-        if (isMethodCall(template)) {
-          return this.evaluateMethod(template, scope)
-        }
-        return this.evaluateObject(template, scope)
       default:
         return undefined
     }
   }
 
-  protected evaluateNumber(template: number, scope: Scope): Json | undefined {
+  protected evaluateNull(context: EvaluationContext<null>): Json | undefined {
+    return null
+  }
+
+  protected evaluateNumber(context: EvaluationContext<number>): Json | undefined {
     // Although Json should not contain NaN, we still need to handle it because
     // the typing system does not allow us to prevent it from being used.
-    return Number.isFinite(template) ? template : undefined
+    return Number.isFinite(context.template) ? context.template : undefined
   }
 
-  protected evaluateString(template: string, scope: Scope): Json | undefined {
-    return template
+  protected evaluateString(context: EvaluationContext<string>): Json | undefined {
+    return context.template
   }
 
-  protected evaluateArray(template: Json[], scope: Scope): Json[] {
-    const result = Array(template.length) as Json[]
+  protected evaluateArray(context: EvaluationContext<Json[]>): Json[] {
+    const result = Array(context.template.length) as Json[]
 
-    for (let i = 0; i < template.length; i++) {
-      const value = this.evaluateIndex(template, i, scope)
-      if (value === undefined) {
-        result[i] = null
-        this.emitError?.('Undefined array entry', [i])
-      } else {
-        result[i] = value
-      }
+    // Optimization: avoid creating a new context for each iteration
+    const loopContext: EvaluationContext<Json, Json[]> = {
+      parent: context,
+      template: context.template[-1],
+      pathFragment: -1,
+      scope: context.scope,
+    }
+
+    for (let i = 0; i < context.template.length; i++) {
+      loopContext.template = context.template[i]
+      loopContext.pathFragment = i
+
+      const item = this.evaluate(loopContext)
+
+      if (item === undefined) result[i] = null
+      else result[i] = item
     }
 
     return result
   }
 
-  protected evaluateObject(template: JsonObject, scope: Scope): JsonObject {
-    // This method does not make use of evaluateKey for two reasons:
-    // 1) It is called very often, so we want to avoid the try/catch overhead for every iteration
-    // 2) evaluateKey will not account for "undefined" in the executionCount
-    const pathIndex = this.currentPath.length
-    try {
-      const result: JsonObject = {}
-      for (const key in template) {
-        this.currentPath[pathIndex] = key
-        const value = this.evaluate(template[key], scope)
-        if (value !== undefined) result[key] = value
-      }
-      return result
-    } finally {
-      this.currentPath.length = pathIndex // Restore path
+  protected evaluateObject(context: EvaluationContext<JsonObject>): Json | undefined {
+    if (context.template[this.callKey] !== undefined) {
+      return this.evaluateStandardCall(context)
     }
+
+    return this.evaluatePlainObject(context)
   }
 
-  protected evaluateMethod(template: MethodCall, scope: Scope): undefined | Json {
-    for (const name in template) {
-      const method = internalMethods.get(name as MethodName)
-      if (method) return method.implementation.call(this, template, scope)
+  protected evaluatePlainObject(context: EvaluationContext<JsonObject>): Json | undefined {
+    // Optimization: avoid creating a new context for each iteration
+    const loopContext: EvaluationContext<Json, JsonObject> = {
+      parent: context,
+      template: null,
+      pathFragment: '',
+      scope: context.scope,
     }
 
-    if (this.customMethods) {
-      for (const name in template) {
-        const method = this.customMethods.get(name as MethodName)
-        if (method) return method.implementation.call(this, template, scope)
+    const result: JsonObject = {}
+    for (const key in context.template) {
+      const value = context.template[key]
+      if (value === undefined) continue
+
+      loopContext.template = value
+      loopContext.pathFragment = key
+
+      const item = this.evaluate(loopContext)
+
+      if (item !== undefined) result[key] = item
+    }
+    return result
+  }
+
+  protected evaluateStandardCall(context: EvaluationContext<JsonObject>) {
+    const { template } = context
+    if (template['argv'] === undefined) {
+      this.onError?.(
+        new EvaluationError(`${this.callKey} method required an "argv" argument`, context)
+      )
+      return undefined
+    }
+
+    if (template['args'] !== undefined) {
+      if (template['args'] === null || typeof template['args'] !== 'object') {
+        this.onError?.(
+          new EvaluationError(`${this.callKey} method "args" argument must be an object`, context)
+        )
+        return undefined
       }
     }
 
-    this.emitError?.(`Unknown method "${Object.keys(template).join('')}"`)
+    const callContext = {
+      parent: context,
+      template: template[this.callKey] as Json,
+      pathFragment: this.callKey,
+      scope: context.scope,
+    }
+    const callResult = this.evaluate(callContext, isMethodName)
+    if (callResult === undefined) return undefined
 
+    const method = this.findMethod(context, callResult)
+    return method?.call(
+      new StandardMethodContext(this, context as EvaluationContext<StandardCallObject>)
+    )
+  }
+
+  protected findMethod(context: EvaluationContext, name: string): undefined | MethodImplementation {
+    const definition = internalMethods.get(name)
+    if (definition) return definition.implementation
+
+    // TODO: find in scope
+
+    this.onError?.(new EvaluationError(`Unknown method "${name}"`, context))
     return undefined
   }
+}
 
-  public evaluateIndex(template: Json[], index: number, scope: Scope) {
-    const pathIndex = this.currentPath.length
-    try {
-      this.currentPath[pathIndex] = index
-      return this.evaluate(template[index], scope)
-    } finally {
-      this.currentPath.length = pathIndex // Restore path
-    }
-  }
+function isMethodName(value: undefined | Json): value is string {
+  return typeof value === 'string'
+}
 
-  // Method utilities
+type StandardCallObject = {
+  argv: Json
+  args?: JsonObject
+}
 
-  public evaluateKey(template: JsonObject, name: string, scope: Scope) {
-    const value = Object.prototype.hasOwnProperty.call(template, name) ? template[name] : undefined
-
-    // Since these helpers are only used when evaluating methods, there is no
-    // need to "count" as an execution when the argument is null (because the
-    // method call itself was already accounted for). This allows to increase
-    // performances while not giving a penality to optional method arguments.
-    if (value === undefined) return undefined
-
-    const pathIndex = this.currentPath.length
-    try {
-      this.currentPath[pathIndex] = name
-      return this.evaluate(value, scope)
-    } finally {
-      this.currentPath.length = pathIndex // Restore path
-    }
-  }
-
-  public *iterateKey(template: JsonObject, name: string, scope: Scope): Iterator<Json> {
-    const value = template[name]
-
-    // Since these helpers are only used when evaluating methods, there is no
-    // need to "count" as an execution when the argument is null (because the
-    // method call itself was already accounted for). This allows to increase
-    // performances while not giving a penality to optional method arguments.
-    if (value === undefined) return
-
-    const pathIndex = this.currentPath.length
-    try {
-      this.currentPath[pathIndex] = name
-
-      if (Array.isArray(value)) {
-        for (let i = 0; i < value.length; i++) {
-          const item = this.evaluateIndex(value, i, scope)
-          yield item === undefined ? null : item
-        }
-      } else {
-        // TODO: Optimize this ? (e.g. avoid evaluating plain objects / number / boolean)
-        const result = this.evaluate(value, scope)
-        if (Array.isArray(result)) {
-          for (let i = 0; i < result.length; i++) {
-            yield result[i]
+class StandardMethodContext extends MethodContext {
+  constructor(
+    evaluator: MethodEvaluator,
+    context: Readonly<EvaluationContext<StandardCallObject>>
+  ) {
+    super(
+      evaluator,
+      {
+        parent: context,
+        template: context.template['argv'],
+        pathFragment: 'argv',
+        scope: context.scope,
+      },
+      context.template['args']
+        ? {
+            parent: context,
+            template: context.template['args'],
+            pathFragment: 'args',
+            scope: context.scope,
           }
-        } else {
-          this.emitError?.('Expected an array')
-        }
-      }
-    } finally {
-      this.currentPath.length = pathIndex // Restore path
-    }
+        : null
+    )
   }
 }

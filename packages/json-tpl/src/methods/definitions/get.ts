@@ -1,28 +1,30 @@
-import type { Json } from '../../util/json'
-import type { Path } from '../../util/path'
+import type { Json } from '../../util/json.js'
+import type { PathFragment } from '../../util/path.js'
 
-import { isPlainObject } from '../../util/object'
-import { isPath } from '../../util/path'
+import { isPlainObject } from '../../util/object.js'
+import { isPathFragment } from '../../util/path.js'
 
-import type { MethodImplementation } from '../definitions'
+import type { MethodImplementation } from '../definitions.js'
 
-export const implementation: MethodImplementation = function (methodCall, scope) {
-  const variable = this.evaluateKey(methodCall, '$get', scope)
-  const path = this.evaluateKey(methodCall, '$path', scope)
+export const implementation: MethodImplementation = function () {
+  const path = this.arg('path')?.iterator(isPathFragment)
+  if (path === undefined) return undefined
 
-  if (!isPath(path)) {
-    this.emitError?.(`Value must be a path`, ['$var'])
-    return undefined
-  }
+  const variable = this.evaluate()
+  if (variable === undefined) return undefined
 
   return getPath(variable, path)
 }
 
-export function getPath(value: Json | undefined, path: Readonly<Path>): Json | undefined {
+export function getPath(
+  value: Json | undefined,
+  it: Iterator<PathFragment | undefined>
+): Json | undefined {
   let current: Json | undefined = value
 
-  for (let i = 0; i < path.length; i++) {
-    const fragment = path[i]
+  for (let result = it.next(); !result.done; result = it.next()) {
+    const fragment = result.value
+    if (fragment === undefined) return undefined
     if (fragment === '__proto__') return undefined
 
     switch (typeof current) {
