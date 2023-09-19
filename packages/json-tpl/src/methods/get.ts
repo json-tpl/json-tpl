@@ -1,19 +1,23 @@
-import type { Json } from '../../util/json.js'
-import type { PathFragment } from '../../util/path.js'
+import type { MethodCompile } from '../dynamic/types'
 
-import { isPlainObject } from '../../util/object.js'
-import { isPathFragment } from '../../util/path.js'
+import type { Json } from '../util/json'
+import type { PathFragment } from '../util/path'
 
-import type { MethodImplementation } from '../definitions.js'
+import { isPlainObject } from '../util/object'
+import { isPathFragment } from '../util/path'
 
-export const implementation: MethodImplementation = function () {
-  const path = this.arg('path')?.iterator(isPathFragment)
-  if (path === undefined) return undefined
+export const compile: MethodCompile = function getCompiler(context) {
+  const argvCompiled = this.compileArgv(context)
+  const pathCompiled = this.compileArgsIterator(context, 'path', true, isPathFragment)
 
-  const variable = this.evaluate()
-  if (variable === undefined) return undefined
+  return (scope, execCtx) => {
+    const argv = argvCompiled(scope, execCtx)
+    if (argv === undefined) return undefined
 
-  return getPath(variable, path)
+    const path = pathCompiled(scope, execCtx)
+
+    return getPath(argv, path)
+  }
 }
 
 export function getPath(

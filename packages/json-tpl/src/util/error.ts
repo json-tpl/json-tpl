@@ -1,26 +1,26 @@
-import type { EvaluationContext, JsonContext } from './context.js'
-import type { Json } from './json.js'
-import type { Path } from './path.js'
+import type { CompilationContext, ExecutionContext } from './context'
+import type { Json } from './json'
+import type { Path } from './path'
 
-import { computeContextPath } from './context.js'
-import { stringifyPath } from './path.js'
+import { computeContextPath } from './context'
+import { stringifyPath } from './path'
 
-export class JsonTplError extends Error {}
-
-export class EvaluationLimitError extends JsonTplError {
-  constructor(count: number) {
-    super(`Execution limit exceeded (${count})`)
-  }
-}
-
-export class TemplateError extends JsonTplError {
-  public readonly path?: Readonly<Path>
-  public readonly template: Json
-
-  constructor(message: string, context: Readonly<JsonContext>) {
+export class TemplateError extends Error {
+  constructor(
+    message: string,
+    public readonly compilationContext?: Readonly<CompilationContext>
+  ) {
     super(message)
-    this.path = computeContextPath(context)
-    this.template = context.template
+  }
+
+  get path(): Readonly<Path> | undefined {
+    const { compilationContext } = this
+    if (!compilationContext) return undefined
+    return computeContextPath(compilationContext)
+  }
+
+  get template(): Json | undefined {
+    return this.compilationContext?.template
   }
 
   toString() {
@@ -30,18 +30,22 @@ export class TemplateError extends JsonTplError {
   }
 }
 
-export class EvaluationError extends TemplateError {
+export class ExecutionError extends TemplateError {
   constructor(
     message: string,
-    context: Readonly<EvaluationContext>,
-    public readonly result?: Json
+    compilationContext: undefined | Readonly<CompilationContext>,
+    public readonly executionContext: Readonly<ExecutionContext>
   ) {
-    super(message, context)
+    super(message, compilationContext)
+  }
+}
+
+export class ExecutionLimitError extends ExecutionError {
+  get limit() {
+    return this.executionContext.executionLimit
   }
 
   toString() {
-    const got = this.result === undefined ? '' : ` (got: ${typeof this.result})`
-    // eslint-disable-next-line @typescript-eslint/no-base-to-string
-    return `${super.toString()}${got}`
+    return `${super.toString()} (limit: ${this.limit})`
   }
 }

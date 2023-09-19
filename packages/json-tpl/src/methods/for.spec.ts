@@ -1,7 +1,9 @@
-import { createObjectScope, evaluate } from '../../index'
-import { thrower } from '../../util/function'
-import { Json } from '../../util/json'
-import { Scope } from '../../util/scope'
+import { compile, createObjectScope, evaluate } from '../index'
+import { thrower } from '../util/function'
+import { Json } from '../util/json'
+import { Scope } from '../util/scope'
+
+const evalLimit = (template: Json, scope: Scope) => evaluate(template, scope, { limit: 1e6 })
 
 const evalStrict = (template: Json, scope: Scope) =>
   evaluate(template, scope, { onError: thrower, limit: 1e6 })
@@ -11,8 +13,12 @@ describe('var', () => {
     foo: 'foo',
   })
 
+  it('should validate the "do" property', () => {
+    expect(() => compile({ '@for': 3 })).toThrowError('Missing argument "do" in @for')
+  })
+
   it('should allow generating custom arrays', () => {
-    expect(evalStrict({ '@for': 4 }, scope)).toStrictEqual([1, 2, 3, 4])
+    expect(evaluate({ '@for': 4 }, scope)).toStrictEqual([null, null, null, null])
     expect(evalStrict({ '@for': 4, do: 0 }, scope)).toStrictEqual([0, 0, 0, 0])
   })
 
@@ -60,12 +66,9 @@ describe('var', () => {
   })
 
   it('should trigger execution limit', () => {
-    expect(() => evalStrict({ '@for': 1e6, do: 1 }, scope)).toThrowError(
-      `Execution limit exceeded (${1e6})`
-    )
-    expect(() => evalStrict({ '@for': 1e6 }, scope)).toThrowError(
-      `Execution limit exceeded (${1e6})`
-    )
+    expect(() => evalStrict({ '@for': 1e6, do: 1 }, scope)).toThrowError(`Execution limit exceeded`)
+    expect(() => evalLimit({ '@for': 1e6 }, scope)).toThrowError(`Execution limit exceeded`)
+    expect(() => evalLimit({ '@for': 1e6 - 1 }, scope)).not.toThrowError()
   })
 
   // TODO : add tests with arrays and objects

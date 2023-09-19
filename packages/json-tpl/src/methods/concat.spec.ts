@@ -1,4 +1,4 @@
-import { createObjectScope, evaluate } from '../../index'
+import { createObjectScope, evaluate } from '../index'
 
 describe('var', () => {
   const scope = createObjectScope({

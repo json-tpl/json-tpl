@@ -1,4 +1,4 @@
-import { isPlainObject } from './object.js'
+import { isPlainObject } from './object'
 
 export type JsonScalar = string | number | boolean | null
 export type JsonObject = { [_ in string]?: Json }
