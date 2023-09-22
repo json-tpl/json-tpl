@@ -5,15 +5,19 @@ import type {
   ResultValidator,
 } from '../core/types.js'
 import type { TemplateContext } from '../util/context.js'
-import { isDefined, type ErrorHandler } from '../util/function.js'
+import type { ErrorHandler } from '../util/function.js'
 import type { Json, JsonObject } from '../util/json.js'
 
 import { CoreCompiler } from '../core/compiler.js'
 import { asStaticValue } from '../core/types.js'
+import { getPath } from '../methods/get.js'
+import { parse } from '../parser/parser.js'
 import { isArray } from '../util/array.js'
 import { isContext } from '../util/context.js'
 import { ExecutionError, TemplateError } from '../util/error.js'
+import { isDefined } from '../util/function.js'
 import { createNoopIterator } from '../util/iterator.js'
+import { isPathFragment } from '../util/path.js'
 
 import type { MethodCompiler, MethodDefinition } from './types.js'
 
@@ -40,16 +44,25 @@ export class DynamicCompiler extends CoreCompiler implements MethodCompiler {
   }
 
   protected compileString(context: TemplateContext<string>): CompiledTemplate<Result> {
-    const { json: template } = context
-    if (!template.includes('${')) return () => template
-    if (!template.includes('}')) {
-      this.onError?.(new TemplateError(`Missing "}"`, context))
-      return () => undefined
-    }
+    const { json } = context
 
-    // TODO: Compile template
-    this.onError?.(new TemplateError(`Template expression are not implemented yet.`, context))
-    return () => template
+    if (!json) return asStaticValue(json)
+    if (!json.includes('${')) return asStaticValue(json)
+
+    // TODO: use a cache to avoid parsing the same expressions (typically varaible access)
+    try {
+      return parse<CompiledTemplate<Result>>(json, {
+        compileVariable,
+        compileValue,
+        compileObjectGet,
+        compileNegation,
+        compileConcatenation,
+        compileMethodCall: compileMethodCall.bind(this),
+      })
+    } catch (e) {
+      this.onError?.(new TemplateError(`Invalid template`, context))
+      return asStaticValue(undefined)
+    }
   }
 
   protected compileObject(context: TemplateContext<JsonObject>): CompiledTemplate<Result> {
@@ -69,7 +82,7 @@ export class DynamicCompiler extends CoreCompiler implements MethodCompiler {
       this.onError?.(
         new TemplateError(`No more than one key can start with "${this.argvPrefix}"`, context)
       )
-      return () => undefined
+      return asStaticValue(undefined)
     } else if (callKeys.length === 1) {
       return this.compileCall(callKeys[0], context)
     }
@@ -279,4 +292,115 @@ function getKeyContext(
 
 function startsWithThis(this: string, key: string): boolean {
   return key.startsWith(this)
+}
+
+function compileVariable(identifier: string): CompiledTemplate<Result> {
+  return (scope, execCtx) => scope(identifier)
+}
+
+function compileValue(value: string | number | boolean | null): CompiledTemplate<Result> {
+  return asStaticValue(value)
+}
+
+function compileObjectGet(
+  $$argv: CompiledTemplate<Result>,
+  $$path: CompiledTemplate<Result>[]
+): CompiledTemplate<Result> {
+  // TODO: optimize (e.g. if $$argv & $$path are static, return a static value)
+
+  return (scope, execCtx) => {
+    const objectValue = $$argv(scope, execCtx)
+    if (objectValue === undefined) return undefined
+    if (typeof objectValue === 'function') return undefined
+
+    let index = 0
+
+    return getPath(objectValue, {
+      next: () => {
+        while (index < $$path.length) {
+          const fn = $$path[index++]
+          const value = fn(scope, execCtx)
+
+          if (isPathFragment(value)) {
+            return { done: false, value }
+          } else {
+            execCtx.onError?.(
+              new Error(`Cannot use ${typeof value} as path fragment at index ${index}`)
+            )
+            return { done: false, value: undefined }
+          }
+        }
+        return { done: true, value: undefined }
+      },
+    })
+  }
+}
+
+function compileNegation($$argv: CompiledTemplate<Result>): CompiledTemplate<Result> {
+  return (scope, execCtx) => {
+    const result = $$argv(scope, execCtx)
+    return !result
+  }
+}
+
+function compileConcatenation($$argv: CompiledTemplate<Result>[]): CompiledTemplate<Result> {
+  const { length } = $$argv
+  return (scope, execCtx) => {
+    const parts: string[] = []
+    for (let i = 0; i < length; i++) {
+      const $$fragment = $$argv[i]
+      const result = $$fragment(scope, execCtx)
+      switch (typeof result) {
+        case 'string':
+          parts.push(result)
+          break
+        case 'number':
+        case 'boolean':
+          parts.push(String(result))
+          break
+        default:
+          execCtx.onError?.(new Error(`Cannot concat type ${typeof result} at index ${i}`))
+          break
+      }
+    }
+    return parts.join('')
+  }
+}
+
+function compileMethodCall(
+  this: DynamicCompiler,
+  name: string,
+  $$argv: CompiledTemplate<Result>,
+  $$args: Record<string, CompiledTemplate<Result>>
+): CompiledTemplate<Result> {
+  const definition = this.methods.get(name)
+  if (definition) {
+    // return definition.compile.call(this, $$argv, $$args)
+    throw new Error('Not supported yet')
+  }
+
+  return (scope, execCtx) => {
+    const value = scope(name)
+    if (typeof value !== 'function') {
+      execCtx.onError?.(new Error(`Method not found ${name}`))
+      return undefined
+    }
+
+    const argv = $$argv(scope, execCtx)
+    if (argv === undefined) {
+      execCtx.onError?.(new Error(`Invalid argument for ${name}`))
+      return undefined
+    }
+
+    const args: JsonObject = {}
+    for (const [key, $$arg] of Object.entries($$args)) {
+      const arg = $$arg(scope, execCtx)
+      if (arg === undefined) continue
+      if (typeof arg === 'function') continue
+
+      args[key] = arg
+    }
+
+    return value(argv, args)
+  }
 }

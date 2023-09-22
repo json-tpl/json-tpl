@@ -6,6 +6,7 @@ module.exports = {
     '\\.ts$': ['ts-jest', { useESM: true }],
   },
   moduleNameMapper: {
+    './parser.js': '../../dist/cjs/parser/parser.js',
     '(.+)\\.js': '$1',
   },
 }
