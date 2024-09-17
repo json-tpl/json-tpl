@@ -119,17 +119,17 @@ export class DynamicCompiler extends CoreCompiler implements MethodCompiler {
           ] as const
       )
 
-    return (scope, execCtx) => {
+    return function (scope) {
       const value = scope(name)
 
       if (typeof value !== 'function') {
-        execCtx.onError?.(new TemplateError(`Method not found ${key}`, context))
+        this.onError?.(new TemplateError(`Method not found ${key}`, context))
         return undefined
       }
 
-      const argv = $$argv(scope, execCtx)
+      const argv = this.exec($$argv, scope)
       if (argv === undefined) {
-        execCtx.onError?.(new TemplateError(`Invalid argument for ${key}`, argvContext))
+        this.onError?.(new TemplateError(`Invalid argument for ${key}`, argvContext))
         return undefined
       }
 
@@ -140,7 +140,7 @@ export class DynamicCompiler extends CoreCompiler implements MethodCompiler {
           // Lazy (+once) acessor
           enumerable: true,
           configurable: true,
-          get: () => (args[key] = compiled(scope, execCtx)),
+          get: () => (args[key] = this.exec(compiled, scope)),
           set: (v: Json | undefined) =>
             Object.defineProperty(args, key, { value: v, writable: false }),
         })
@@ -227,7 +227,7 @@ export class DynamicCompiler extends CoreCompiler implements MethodCompiler {
         )
       )
 
-      return (scope, execCtx) => {
+      return function (scope) {
         let index = 0
         const { length } = compiledItems
         return {
@@ -235,7 +235,7 @@ export class DynamicCompiler extends CoreCompiler implements MethodCompiler {
             while (index < length) {
               // Array.map will not call the callback for <empty> values
               const compiledValue = compiledItems[index++] as undefined | CompiledTemplate<T>
-              const value = compiledValue?.(scope, execCtx)
+              const value = compiledValue ? this.exec(compiledValue, scope) : undefined
               return { done: false, value }
             }
             return { done: true, value: undefined }
@@ -244,8 +244,8 @@ export class DynamicCompiler extends CoreCompiler implements MethodCompiler {
       }
     } else {
       const compiled = this.compile(context, isArray)
-      return (scope, execCtx) => {
-        const result = compiled(scope, execCtx)
+      return function (scope) {
+        const result = this.exec(compiled, scope)
         if (!result) return createNoopIterator()
 
         let index = 0
@@ -259,12 +259,8 @@ export class DynamicCompiler extends CoreCompiler implements MethodCompiler {
                 if (validator(value)) {
                   return { done: false, value }
                 } else {
-                  execCtx.onError?.(
-                    new ExecutionError(
-                      `Result is not valid for "${validator.name}"`,
-                      context,
-                      execCtx
-                    )
+                  this.onError?.(
+                    new ExecutionError(`Result is not valid for "${validator.name}"`, context, this)
                   )
                   return { done: true, value: undefined }
                 }
@@ -295,7 +291,7 @@ function startsWithThis(this: string, key: string): boolean {
 }
 
 function compileVariable(identifier: string): CompiledTemplate<Result> {
-  return (scope, execCtx) => scope(identifier)
+  return (scope) => scope(identifier)
 }
 
 function compileValue(value: string | number | boolean | null): CompiledTemplate<Result> {
@@ -308,8 +304,8 @@ function compileObjectGet(
 ): CompiledTemplate<Result> {
   // TODO: optimize (e.g. if $$argv & $$path are static, return a static value)
 
-  return (scope, execCtx) => {
-    const objectValue = $$argv(scope, execCtx)
+  return function (scope) {
+    const objectValue = this.exec($$argv, scope)
     if (objectValue === undefined) return undefined
     if (typeof objectValue === 'function') return undefined
 
@@ -319,12 +315,12 @@ function compileObjectGet(
       next: () => {
         while (index < $$path.length) {
           const fn = $$path[index++]
-          const value = fn(scope, execCtx)
+          const value = this.exec(fn, scope)
 
           if (isPathFragment(value)) {
             return { done: false, value }
           } else {
-            execCtx.onError?.(
+            this.onError?.(
               new Error(`Cannot use ${typeof value} as path fragment at index ${index}`)
             )
             return { done: false, value: undefined }
@@ -337,19 +333,19 @@ function compileObjectGet(
 }
 
 function compileNegation($$argv: CompiledTemplate<Result>): CompiledTemplate<Result> {
-  return (scope, execCtx) => {
-    const result = $$argv(scope, execCtx)
+  return function (scope): boolean {
+    const result = this.exec($$argv, scope)
     return !result
   }
 }
 
 function compileConcatenation($$argv: CompiledTemplate<Result>[]): CompiledTemplate<Result> {
   const { length } = $$argv
-  return (scope, execCtx) => {
+  return function (scope) {
     const parts: string[] = []
     for (let i = 0; i < length; i++) {
       const $$fragment = $$argv[i]
-      const result = $$fragment(scope, execCtx)
+      const result = this.exec($$fragment, scope)
       switch (typeof result) {
         case 'string':
           parts.push(result)
@@ -359,7 +355,7 @@ function compileConcatenation($$argv: CompiledTemplate<Result>[]): CompiledTempl
           parts.push(String(result))
           break
         default:
-          execCtx.onError?.(new Error(`Cannot concat type ${typeof result} at index ${i}`))
+          this.onError?.(new Error(`Cannot concat type ${typeof result} at index ${i}`))
           break
       }
     }
@@ -379,22 +375,22 @@ function compileMethodCall(
     throw new Error('Not supported yet')
   }
 
-  return (scope, execCtx) => {
+  return function (scope) {
     const value = scope(name)
     if (typeof value !== 'function') {
-      execCtx.onError?.(new Error(`Method not found ${name}`))
+      this.onError?.(new Error(`Method not found ${name}`))
       return undefined
     }
 
-    const argv = $$argv(scope, execCtx)
+    const argv = this.exec($$argv, scope)
     if (argv === undefined) {
-      execCtx.onError?.(new Error(`Invalid argument for ${name}`))
+      this.onError?.(new Error(`Invalid argument for ${name}`))
       return undefined
     }
 
     const args: JsonObject = {}
     for (const [key, $$arg] of Object.entries($$args)) {
-      const arg = $$arg(scope, execCtx)
+      const arg = this.exec($$arg, scope)
       if (arg === undefined) continue
       if (typeof arg === 'function') continue
 

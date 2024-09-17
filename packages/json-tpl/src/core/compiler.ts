@@ -1,10 +1,9 @@
-import type { ExecutionContext, TemplateContext } from '../util/context.js'
+import type { TemplateContext } from '../util/context.js'
 import type { ErrorHandler } from '../util/function.js'
 import { isJsonSerializable, type Json, type JsonObject } from '../util/json.js'
-import type { Scope } from '../util/scope.js'
 
 import { isArray } from '../util/array.js'
-import { ExecutionError, ExecutionLimitError, TemplateError } from '../util/error.js'
+import { ExecutionError, TemplateError } from '../util/error.js'
 import { isNonNullable, isNotFunction } from '../util/function.js'
 
 import type { CompiledTemplate, Result, ResultValidator, StaticCompiledTemplate } from './types.js'
@@ -28,12 +27,12 @@ export class CoreCompiler {
       let compile: undefined | (() => CompiledTemplate<T>) = () =>
         this.compileInternal(context, validator)
 
-      return (scope, execCtx) => {
+      return function (scope) {
         if (compile) {
           compiled = compile()
           compile = undefined
         }
-        return compiled!(scope, execCtx)
+        return this.exec(compiled!, scope)
       }
     } else {
       return this.compileInternal<T>(context, validator)
@@ -60,19 +59,12 @@ export class CoreCompiler {
       return asStaticValue(value)
     }
 
-    // When debug is not enabled, avoid keeping a reference to the original template input
-    const contextRef = this.debug ? context : undefined
-
-    return (scope: Scope, execCtx: ExecutionContext): T | undefined => {
-      if (execCtx.executionCount++ > execCtx.executionLimit) {
-        throw new ExecutionLimitError('Execution limit exceeded', contextRef, execCtx)
-      }
-
-      const result = compiled(scope, execCtx)
+    return function (scope) {
+      const result = this.exec(compiled, scope)
 
       if (!validator(result)) {
-        execCtx.onError?.(
-          new ExecutionError(`Result is not valid for "${validator.name}"`, contextRef, execCtx)
+        this.onError?.(
+          new ExecutionError(`Result is not valid for "${validator.name}"`, compiled.source, this)
         )
 
         return undefined
@@ -146,11 +138,11 @@ export class CoreCompiler {
     }
 
     const { length } = compiledItems
-    return (scope, options): Json[] => {
+    return function (scope): Json[] {
       const result = Array(length) as Json[]
       for (let i = 0; i < length; i++) {
         const compiledItem = compiledItems[i]
-        const value = compiledItem(scope, options)
+        const value = this.exec(compiledItem, scope)
         result[i] = value === undefined ? null : value
       }
       return result
@@ -187,13 +179,13 @@ export class CoreCompiler {
     }
 
     const { length } = compiledEntries
-    return (scope, execCtx): JsonObject => {
+    return function (scope): JsonObject {
       const result: JsonObject = {}
 
       for (let i = 0; i < length; i++) {
         const entry = compiledEntries[i]
         const compiledValue = entry[1]
-        const value = compiledValue(scope, execCtx)
+        const value = this.exec(compiledValue, scope)
         if (value !== undefined) {
           const key = entry[0]
           result[key] = value

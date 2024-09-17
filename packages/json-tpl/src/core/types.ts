@@ -1,20 +1,28 @@
-import type { ExecutionContext } from '../util/context.js'
+import type { TemplateContext } from '../util/context.js'
 import type { Json } from '../util/json.js'
 import type { Scope, Variable } from '../util/scope.js'
 
+import { ExecutionLimitError } from '../util/error.js'
+import { ErrorHandler } from '../util/function.js'
 import { toJson } from '../util/json.js'
 
 export type Result = undefined | Variable
 
 export type DynamicCompiledTemplate<T extends Result = Json | undefined> = {
-  (scope: Scope, context: ExecutionContext): T | undefined
+  (this: ExecutionContext, scope: Scope): T | undefined
+  readonly source?: TemplateContext
   readonly static?: false
 }
 
 export type StaticCompiledTemplate<T extends Result = Json | undefined> = {
-  (scope: Scope, context: ExecutionContext): T | undefined
+  (this: ExecutionContext, scope: Scope): T | undefined
+  readonly source?: TemplateContext
   readonly static: true
   readonly staticValue: T | undefined
+}
+
+export type CompiledTemplateIterator<T extends Result = Json | undefined> = {
+  (this: ExecutionContext, scope: Scope): Iterator<T | undefined>
 }
 
 export type CompiledTemplate<T extends Result = Json | undefined> =
@@ -27,10 +35,24 @@ export function isStaticCompiledTemplate<T extends Result>(
   return value.static === true
 }
 
-export type CompiledTemplateIterator<T extends Result = Json | undefined> = (
-  scope: Scope,
-  context: ExecutionContext
-) => Iterator<T | undefined>
+export class ExecutionContext {
+  protected executionCount = 0
+  constructor(
+    public readonly onError?: ErrorHandler,
+    public readonly executionLimit: number = 1e7
+  ) {}
+
+  exec<T extends Result = undefined | Json>(
+    compiled: CompiledTemplate<T>,
+    scope: Scope
+  ): T | undefined {
+    if (this.executionCount++ > this.executionLimit) {
+      throw new ExecutionLimitError('Execution limit exceeded', compiled.source, this)
+    }
+
+    return this.exec(compiled, scope)
+  }
+}
 
 export type ResultValidator<T extends Result> = (value: Result) => value is T
 

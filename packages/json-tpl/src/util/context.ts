@@ -1,4 +1,3 @@
-import type { ErrorHandler } from './function.js'
 import type { Json, JsonObject } from './json.js'
 import type { Path } from './path.js'
 
@@ -10,12 +9,6 @@ export type TemplateContextLocation =
 export type TemplateContext<T extends Json = Json> = {
   json: T
   location: TemplateContextLocation
-}
-
-export type ExecutionContext = {
-  executionCount: number
-  executionLimit: number
-  onError: ErrorHandler | null
 }
 
 export function computeContextPath(context: TemplateContext): Path {
