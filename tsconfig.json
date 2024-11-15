@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "allowJs": true,
+    "checkJs": true,
+    "moduleResolution": "Node",
+
+    "allowUmdGlobalAccess": false,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+
+    "strict": true,
+    "alwaysStrict": true,
+    "noFallthroughCasesInSwitch": false, // Handled by eslint
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "strictFunctionTypes": true,
+    "strictNullChecks": true,
+    "strictPropertyInitialization": true,
+    "useDefineForClassFields": true,
+    "noStrictGenericChecks": false,
+
+    "target": "ES2021",
+    "module": "ES2022",
+    "jsx": "preserve",
+    "disableSizeLimit": false,
+    "removeComments": false,
+    "noEmit": true,
+    "importHelpers": true,
+    "noEmitHelpers": false,
+    "downlevelIteration": false,
+    "isolatedModules": false,
+    "resolveJsonModule": false,
+    "esModuleInterop": true,
+
+    "traceResolution": false,
+    "listEmittedFiles": false,
+    "listFiles": false,
+    "pretty": true
+  },
+  "include": ["./**/.*.js", "./**/*.js", "./**/*.cjs", "./**/*.mjs", "./**/*.ts"],
+  "exclude": ["node_modules/*", "./**/dist/*"]
+}

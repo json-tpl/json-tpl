@@ -1,0 +1,9 @@
+{
+  "extends": ["eslint:recommended"],
+  "rules": {
+    "no-restricted-syntax": "error",
+    "no-unreachable": "error",
+    "prefer-const": "error",
+    "prefer-template": "error"
+  }
+}

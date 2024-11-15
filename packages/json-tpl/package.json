@@ -1,0 +1,33 @@
+{
+  "name": "json-tpl",
+  "version": "0.0.1",
+  "description": "A simple JSON template engine",
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "module": "./dist/esm/index.js",
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "require": "./dist/cjs/index.js",
+      "import": "./dist/esm/index.js",
+      "types": "./dist/esm/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs",
+    "build:esm": "npm run build:esm:parser && npm run build:esm:typescript",
+    "build:esm:parser": "mkdir -p dist/esm/parser && peggy --cache --format es --output dist/esm/parser/parser.js src/parser/parser.pegjs",
+    "build:esm:typescript": "tsc",
+    "build:cjs": "npm run build:cjs:parser && npm run build:cjs:typescript",
+    "build:cjs:parser": "mkdir -p dist/cjs/parser && peggy --cache --format commonjs --output dist/cjs/parser/parser.js src/parser/parser.pegjs",
+    "build:cjs:typescript": "tsc --noEmit false --outDir dist/cjs  --module commonjs --declaration false --declarationMap false --downlevelIteration true --target es5",
+    "test": "jest"
+  },
+  "dependencies": {
+    "tslib": "1.x.x || 2.x.x"
+  },
+  "devDependencies": {
+    "peggy": "^3.0.2",
+    "typescript": "^5.2.2"
+  }
+}
